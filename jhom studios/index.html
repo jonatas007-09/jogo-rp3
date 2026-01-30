@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8"/>
   <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"/>
-  <title>Mini City BR — Multiplayer por Sala</title>
+  <title>Mini City BR — Multiplayer + Chat + Smooth</title>
   <style>
     html,body{margin:0;height:100%;overflow:hidden;background:#0b0f14;font-family:system-ui,Segoe UI,Roboto,Arial}
     canvas{display:block}
@@ -12,16 +12,17 @@
       position:absolute;left:12px;top:12px;display:flex;gap:10px;align-items:center;flex-wrap:wrap;
       background:rgba(0,0,0,.45);border:1px solid rgba(255,255,255,.12);
       padding:10px 12px;border-radius:12px;backdrop-filter: blur(8px);pointer-events:auto;
-      max-width:min(980px, calc(100vw - 24px));
+      max-width:min(1120px, calc(100vw - 24px));
     }
-    #topbar button, #topbar input{
+    #topbar button{
       pointer-events:auto;border:1px solid rgba(255,255,255,.16);
-      background:rgba(255,255,255,.08);color:#eaf1ff;border-radius:10px;padding:8px 10px;
-      outline:none;
+      background:rgba(255,255,255,.08);color:#eaf1ff;border-radius:10px;padding:8px 10px;cursor:pointer;
     }
-    #topbar input{ width: 150px; }
-    #topbar button{ cursor:pointer; }
     #topbar button:hover{background:rgba(255,255,255,.14)}
+    #topbar input{
+      pointer-events:auto;border:1px solid rgba(255,255,255,.16);
+      background:rgba(255,255,255,.08);color:#eaf1ff;border-radius:10px;padding:8px 10px;outline:none;
+    }
     #help{
       position:absolute;left:12px;bottom:12px;max-width:860px;
       background:rgba(0,0,0,.45);border:1px solid rgba(255,255,255,.12);
@@ -41,8 +42,6 @@
     .muted{opacity:.85}
     .kbd{display:inline-block;padding:1px 6px;border-radius:6px;border:1px solid rgba(255,255,255,.18);background:rgba(255,255,255,.08)}
     .badge{display:inline-block;padding:2px 8px;border-radius:999px;border:1px solid rgba(255,255,255,.18);background:rgba(255,255,255,.08)}
-    .ok{color:#a8ffb2}
-    .warn{color:#ffd38a}
   </style>
 </head>
 <body>
@@ -53,26 +52,43 @@
     <button id="btnQuality">Qualidade: Alta</button>
 
     <span class="badge">Multiplayer</span>
-    <input id="inpName" placeholder="Seu nome" maxlength="16" />
-    <input id="inpRoom" placeholder="Sala (ex: 1234)" maxlength="12" />
+    <input id="mpName" placeholder="Seu nome" maxlength="18" style="width:130px"/>
+    <input id="mpRoom" placeholder="Sala (ex: favela1)" maxlength="16" style="width:130px"/>
     <button id="btnJoin">Entrar na Sala</button>
-    <button id="btnLeave">Sair</button>
-    <span id="netStatus" class="muted">offline</span>
+    <span id="mpStatus" class="muted">offline</span>
   </div>
 
   <div id="stats"></div>
   <div id="crosshair"></div>
 
   <div id="help">
-    <div><b>Mini City BR</b> <span class="muted">— favela procedural + colisão + multiplayer por sala (cilindros + nome)</span></div>
+    <div><b>Mini City BR</b> <span class="muted">— multiplayer por sala + chat + players suaves (LERP)</span></div>
     <div style="margin-top:6px">
       <span class="kbd">W</span><span class="kbd">A</span><span class="kbd">S</span><span class="kbd">D</span> andar ·
       <span class="kbd">Shift</span> correr ·
       <span class="kbd">Espaço</span> pular ·
-      <span class="kbd">Esc</span> solta o mouse
+      <span class="kbd">Esc</span> solta o mouse ·
+      <span class="kbd">T</span> chat
     </div>
     <div class="muted" style="margin-top:6px">
-      Dica: pra amigos entrarem, todos usam o <b>mesmo código</b> em “Sala”.
+      Pra jogar com amigos: todos entram com o <b>mesmo código de sala</b>.
+    </div>
+  </div>
+
+  <!-- CHAT -->
+  <div id="chatBox" style="
+    position:absolute; right:12px; bottom:12px; width:320px; max-width:44vw;
+    background:rgba(0,0,0,.45); border:1px solid rgba(255,255,255,.12);
+    border-radius:12px; backdrop-filter: blur(8px); pointer-events:auto;
+    overflow:hidden;">
+    <div id="chatLog" style="height:160px; overflow:auto; padding:10px 10px; font-size:13px; line-height:1.25;"></div>
+    <div style="display:flex; gap:8px; padding:10px; border-top:1px solid rgba(255,255,255,.10);">
+      <input id="chatInput" placeholder="Digite e Enter..."
+        style="flex:1; padding:8px 10px; border-radius:10px; border:1px solid rgba(255,255,255,.16);
+        background:rgba(255,255,255,.08); color:#eaf1ff; outline:none;" />
+      <button id="chatSend"
+        style="border:1px solid rgba(255,255,255,.16); background:rgba(255,255,255,.08);
+        color:#eaf1ff; border-radius:10px; padding:8px 10px; cursor:pointer;">Enviar</button>
     </div>
   </div>
 </div>
@@ -82,6 +98,7 @@ import * as THREE from "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.m
 
 let QUALITY = "high";
 const cfg = {
+  // player
   gravity: 22.0,
   jumpVel: 7.2,
   walkSpeed: 4.0,
@@ -97,34 +114,43 @@ const cfg = {
   playerHeight: 1.72,
   eyeHeight: 1.55,
 
+  // mundo
   worldSize: 320,
 
+  // ruas
   avenueW: 12.0,
   streetW: 8.0,
   sidewalkW: 2.2,
   curbW: 0.22,
   curbH: 0.10,
 
+  // cruzamento maior
   interPad: 0.35,
   interSizeFor: (w)=> w + 2*(2.2 + 0.22) + 2.0,
 
+  // overlap
   overlap: 0.40,
   yAsphalt: 0.012,
   ySidewalk: 0.016,
   yStripe: 0.018,
   yCurb: 0.020,
 
+  // postes
   poleH: 7.8,
   poleSpacing: 18,
   poleInset: 0.65,
 
+  // lotes
   lotFront: 6.0,
+  lotDepthBase: 5.2,
   setback: 0.75,
   innerRows: 2,
   rowGap: 5.0,
 };
 
+//
 // ===== RENDER / SCENE =====
+//
 const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance" });
 renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
 renderer.setSize(innerWidth, innerHeight);
@@ -139,7 +165,9 @@ scene.fog = new THREE.Fog(0x92bfff, 70, 260);
 
 const camera = new THREE.PerspectiveCamera(78, innerWidth/innerHeight, 0.05, 800);
 
+//
 // ===== LIGHTING =====
+//
 scene.add(new THREE.HemisphereLight(0xbad7ff, 0x1a2230, 0.78));
 const sun = new THREE.DirectionalLight(0xffffff, 1.15);
 sun.position.set(70, 95, 40);
@@ -153,17 +181,22 @@ sun.shadow.camera.top = 140;
 sun.shadow.camera.bottom = -140;
 scene.add(sun);
 
+//
 // ===== UI / INPUT =====
+//
 const btnPlay = document.getElementById("btnPlay");
 const btnReset = document.getElementById("btnReset");
 const btnQuality = document.getElementById("btnQuality");
 const stats = document.getElementById("stats");
 
-const inpName = document.getElementById("inpName");
-const inpRoom = document.getElementById("inpRoom");
+const mpName = document.getElementById("mpName");
+const mpRoom = document.getElementById("mpRoom");
 const btnJoin = document.getElementById("btnJoin");
-const btnLeave = document.getElementById("btnLeave");
-const netStatus = document.getElementById("netStatus");
+const mpStatus = document.getElementById("mpStatus");
+
+const chatLog = document.getElementById("chatLog");
+const chatInput = document.getElementById("chatInput");
+const chatSend = document.getElementById("chatSend");
 
 let pointerLocked = false;
 let yaw = 0, pitch = 0;
@@ -201,7 +234,9 @@ function applyQuality(){
   renderer.setSize(innerWidth, innerHeight);
 }
 
-// ===== COLLIDERS (UMA ÚNICA VEZ - SEM DUPLICAR) =====
+//
+// ===== COLLIDERS =====
+//
 const colliders = [];
 function addColliderFromBox(center, size){
   const half = new THREE.Vector3(size.x/2, size.y/2, size.z/2);
@@ -217,7 +252,9 @@ function addMeshBox(center, size, material, cast=true, receive=true, collider=tr
   return mesh;
 }
 
+//
 // ===== MATERIALS =====
+//
 const mat = {
   ground:   new THREE.MeshStandardMaterial({ color: 0x2c3539, roughness: 0.98 }),
   asphalt:  new THREE.MeshStandardMaterial({ color: 0x1d2226, roughness: 0.96 }),
@@ -253,7 +290,9 @@ function lcg(seed){
   return [seed, (seed & 0xffffff) / 0x1000000];
 }
 
+//
 // ===== BASE WORLD =====
+//
 (function buildBase(){
   const g = new THREE.PlaneGeometry(cfg.worldSize, cfg.worldSize, 1, 1);
   g.rotateX(-Math.PI/2);
@@ -269,11 +308,11 @@ function lcg(seed){
   addMeshBox(new THREE.Vector3( half - t/2, h/2, 0), new THREE.Vector3(t, h, cfg.worldSize), mat.concrete, false, true);
 })();
 
-function addOrientedPlaneRect(cx, cz, w, d, rotY, material, y){
-  const geo = new THREE.PlaneGeometry(w, d);
+function addOrientedPlaneRect(centerX, centerZ, width, length, rotY, material, y){
+  const geo = new THREE.PlaneGeometry(width, length);
   geo.rotateX(-Math.PI/2);
   const mesh = new THREE.Mesh(geo, material);
-  mesh.position.set(cx, y, cz);
+  mesh.position.set(centerX, y, centerZ);
   mesh.rotation.y = rotY;
   mesh.receiveShadow = QUALITY === "high";
   mesh.material.polygonOffset = true;
@@ -296,7 +335,9 @@ function addAxisPlaneRect(x,z,w,d,material,y){
 }
 function v2(x,z){ return new THREE.Vector2(x,z); }
 
+//
 // ===== ROAD GRAPH =====
+//
 const nodes = new Map();
 const roads = [];
 function addNode(id, x, z){ nodes.set(id, { id, p: v2(x,z), roads: new Set() }); }
@@ -306,6 +347,7 @@ function addRoad(aId, bId, w, isAvenue=false){
   nodes.get(bId).roads.add(roads.length-1);
 }
 
+// blueprint
 const GRID_X = [-120, -80, -40, 0, 40, 80, 120];
 const GRID_Z = [-120, -80, -40, 0, 40, 80, 120];
 (function cityBlueprint(){
@@ -335,6 +377,7 @@ const GRID_Z = [-120, -80, -40, 0, 40, 80, 120];
 })();
 
 function buildRoadSystem(){
+  // cruzamentos
   for(const n of nodes.values()){
     let wMax = cfg.streetW;
     for(const ri of n.roads) wMax = Math.max(wMax, roads[ri].w);
@@ -353,6 +396,7 @@ function buildRoadSystem(){
     addAxisPlaneRect(n.p.x + ox, n.p.y + oz, c, c, mat.sidewalk, cfg.ySidewalk);
   }
 
+  // ruas
   for(const r of roads){
     const A = nodes.get(r.aId).p, B = nodes.get(r.bId).p;
     const dx = B.x-A.x, dz=B.y-A.y;
@@ -396,7 +440,7 @@ function buildRoadSystem(){
   }
 }
 
-// ===== POSTES + FIOS (SEM redeclarar addColliderFromBox) =====
+// ===== POSTES + FIOS =====
 function addPole(x,z,h=cfg.poleH){
   const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.12,0.14,h,10), mat.metal);
   pole.position.set(x,h/2,z);
@@ -456,7 +500,6 @@ function addFavelaHouse(seed, x, z, w, h, d, rotY){
   body.castShadow = QUALITY === "high";
   body.receiveShadow = QUALITY === "high";
   scene.add(body);
-
   addColliderFromBox(new THREE.Vector3(x, h/2, z), new THREE.Vector3(w, h, d));
 
   const roof = new THREE.Mesh(new THREE.BoxGeometry(w*1.02, 0.18, d*1.02), mat.roofDark);
@@ -476,7 +519,6 @@ function addFavelaHouse(seed, x, z, w, h, d, rotY){
 
   const frontOffset = d/2 + 0.032;
   const sin = Math.sin(rotY), cos = Math.cos(rotY);
-
   const fx = x + (0)*cos + (-frontOffset)*sin;
   const fz = z + (0)*sin + (-frontOffset)*cos;
 
@@ -542,42 +584,131 @@ function buildBlocksAndFillLots(){
 
       addAxisPlaneRect((x0+x1)/2, (z0+z1)/2, (x1-x0), (z1-z0), mat.ground, 0.010);
 
-      const spanX = (x1-x0);
-      const countX = Math.max(2, Math.floor(spanX / cfg.lotFront));
-      const stepX = spanX / countX;
-      const startX = x0 + stepX/2;
-
-      for (let i=0;i<countX;i++){
-        let r; [seed,r]=lcg(seed); const w = 2.8 + r*2.4;
-        ;[seed,r]=lcg(seed); const d = 3.0 + r*3.0;
-        ;[seed,r]=lcg(seed); const floors = (r<0.62)?1:(r<0.92?2:3);
-        const h = floors*(2.05 + 0.15*Math.random());
-        const x = startX + i*stepX + (Math.random()*0.18-0.09);
-
-        seed = addFavelaHouse(seed, x, (z1 - cfg.setback - d/2), w, h, d, 0);
-        seed = addFavelaHouse(seed, x, (z0 + cfg.setback + d/2), w, h, d, Math.PI);
+      function fillLine(count, fn){
+        for(let i=0;i<count;i++) seed = fn(seed, i, count);
       }
 
-      const spanZ = (z1-z0);
-      const countZ = Math.max(2, Math.floor(spanZ / cfg.lotFront));
-      const stepZ = spanZ / countZ;
-      const startZ = z0 + stepZ/2;
+      const lot = cfg.lotFront;
 
-      for (let i=0;i<countZ;i++){
-        let r; [seed,r]=lcg(seed); const w = 2.8 + r*2.4;
-        ;[seed,r]=lcg(seed); const d = 3.0 + r*3.0;
-        ;[seed,r]=lcg(seed); const floors = (r<0.62)?1:(r<0.92?2:3);
-        const h = floors*(2.05 + 0.15*Math.random());
-        const z = startZ + i*stepZ + (Math.random()*0.18-0.09);
+      // Norte
+      {
+        const span = (x1-x0);
+        const count = Math.max(2, Math.floor(span / lot));
+        const step = span / count;
+        const start = x0 + step/2;
 
-        seed = addFavelaHouse(seed, (x1 - cfg.setback - d/2), z, w, h, d, -Math.PI/2);
-        seed = addFavelaHouse(seed, (x0 + cfg.setback + d/2), z, w, h, d,  Math.PI/2);
+        fillLine(count, (seed,i)=>{
+          let r; [seed,r]=lcg(seed);
+          const w = 2.8 + r*2.4;
+          ;[seed,r]=lcg(seed);
+          const d = 3.0 + r*3.0;
+          ;[seed,r]=lcg(seed);
+          const floors = (r<0.62)?1:(r<0.92?2:3);
+          const h = floors*(2.05 + 0.15*Math.random());
+
+          const x = start + i*step + (Math.random()*0.18-0.09);
+          const z = (z1 - cfg.setback - d/2) + (Math.random()*0.18-0.09);
+          return addFavelaHouse(seed, x, z, w, h, d, 0);
+        });
+      }
+
+      // Sul
+      {
+        const span = (x1-x0);
+        const count = Math.max(2, Math.floor(span / lot));
+        const step = span / count;
+        const start = x0 + step/2;
+
+        fillLine(count, (seed,i)=>{
+          let r; [seed,r]=lcg(seed);
+          const w = 2.8 + r*2.4;
+          ;[seed,r]=lcg(seed);
+          const d = 3.0 + r*3.0;
+          ;[seed,r]=lcg(seed);
+          const floors = (r<0.62)?1:(r<0.92?2:3);
+          const h = floors*(2.05 + 0.15*Math.random());
+
+          const x = start + i*step + (Math.random()*0.18-0.09);
+          const z = (z0 + cfg.setback + d/2) + (Math.random()*0.18-0.09);
+          return addFavelaHouse(seed, x, z, w, h, d, Math.PI);
+        });
+      }
+
+      // Leste
+      {
+        const span = (z1-z0);
+        const count = Math.max(2, Math.floor(span / lot));
+        const step = span / count;
+        const start = z0 + step/2;
+
+        fillLine(count, (seed,i)=>{
+          let r; [seed,r]=lcg(seed);
+          const w = 2.8 + r*2.4;
+          ;[seed,r]=lcg(seed);
+          const d = 3.0 + r*3.0;
+          ;[seed,r]=lcg(seed);
+          const floors = (r<0.62)?1:(r<0.92?2:3);
+          const h = floors*(2.05 + 0.15*Math.random());
+
+          const x = (x1 - cfg.setback - d/2) + (Math.random()*0.18-0.09);
+          const z = start + i*step + (Math.random()*0.18-0.09);
+          return addFavelaHouse(seed, x, z, w, h, d, -Math.PI/2);
+        });
+      }
+
+      // Oeste
+      {
+        const span = (z1-z0);
+        const count = Math.max(2, Math.floor(span / lot));
+        const step = span / count;
+        const start = z0 + step/2;
+
+        fillLine(count, (seed,i)=>{
+          let r; [seed,r]=lcg(seed);
+          const w = 2.8 + r*2.4;
+          ;[seed,r]=lcg(seed);
+          const d = 3.0 + r*3.0;
+          ;[seed,r]=lcg(seed);
+          const floors = (r<0.62)?1:(r<0.92?2:3);
+          const h = floors*(2.05 + 0.15*Math.random());
+
+          const x = (x0 + cfg.setback + d/2) + (Math.random()*0.18-0.09);
+          const z = start + i*step + (Math.random()*0.18-0.09);
+          return addFavelaHouse(seed, x, z, w, h, d, Math.PI/2);
+        });
+      }
+
+      // internas
+      const innerW = (x1-x0), innerD = (z1-z0);
+      if (innerW > 26 && innerD > 26){
+        for(let row=0; row<cfg.innerRows; row++){
+          const inset = 7.0 + row*cfg.rowGap;
+          const z = (z0+z1)/2 + (row%2===0 ? inset : -inset);
+          const span = (x1-x0) - 6;
+          const count = Math.max(3, Math.floor(span / (cfg.lotFront*1.15)));
+          const step = span / count;
+          const start = (x0+x1)/2 - span/2 + step/2;
+
+          for(let i=0;i<count;i++){
+            let r; [seed,r]=lcg(seed);
+            const w = 2.6 + r*2.0;
+            ;[seed,r]=lcg(seed);
+            const d = 2.8 + r*2.4;
+            ;[seed,r]=lcg(seed);
+            const floors = (r<0.78)?1:(r<0.95?2:3);
+            const h = floors*(2.0 + 0.2*Math.random());
+            const x = start + i*step + (Math.random()*0.24-0.12);
+            seed = addFavelaHouse(seed, x, z + (Math.random()*0.24-0.12), w, h, d, (Math.random()*0.25-0.125));
+          }
+        }
       }
     }
   }
 }
 
-// ===== BUILD =====
+//
+// ===== BUILD ALL =====
+//
 buildRoadSystem();
 for (const r of roads){
   if (!r._trim) continue;
@@ -589,9 +720,13 @@ for (const r of roads){
   }
 }
 buildBlocksAndFillLots();
+
+// spawn pad
 addAxisPlaneRect(18, 18, 16, 16, mat.sidewalk, 0.030);
 
+//
 // ===== PLAYER =====
+//
 const player = { pos: new THREE.Vector3(18, 0.2, 18), vel: new THREE.Vector3(), onGround:false };
 
 function resetPlayer(){ player.pos.set(18,0.2,18); player.vel.set(0,0,0); yaw=0; pitch=0; }
@@ -650,6 +785,7 @@ function updateGroundState(){
     if (player.vel.y < 0) player.vel.y = 0;
   }
 }
+
 function getMoveInput(){
   const forward = (keys.has("KeyW") ? 1 : 0) - (keys.has("KeyS") ? 1 : 0);
   const strafe  = (keys.has("KeyD") ? 1 : 0) - (keys.has("KeyA") ? 1 : 0);
@@ -657,252 +793,265 @@ function getMoveInput(){
   return { forward, strafe, run };
 }
 
-// =======================
-// MULTIPLAYER (WebSocket)
-// =======================
-
-// ✅ TROQUE depois do Render
-const WS_URL_DEFAULT = "wss://jogo-rp3-2.onrender.com";
-const WS_URL = new URLSearchParams(location.search).get("ws") || WS_URL_DEFAULT;
+//
+// =========================
+// MULTIPLAYER + CHAT + SMOOTH
+// =========================
+const WS_URL = "wss://jogo-rp3-2.onrender.com";
 
 let ws = null;
-let net = { connected:false, room:"", myId:"", myName:"", lastSend:0, sendHz:12 };
+let myId = null;
+let joinedRoom = "";
+let joinedName = "";
 
-const remotes = new Map();
+const remotes = new Map(); // id -> remote object
 
-function setNetStatus(text, cls="muted"){ netStatus.className = cls; netStatus.textContent = text; }
-function pickColorFromId(id){
-  let h=2166136261;
-  for (let i=0;i<id.length;i++){ h ^= id.charCodeAt(i); h = Math.imul(h, 16777619); }
-  const r = (h>>>16)&255, g=(h>>>8)&255, b=h&255;
-  return (r<<16)|(g<<8)|b;
+function escapeHtml(s){
+  return String(s).replace(/[&<>"']/g, (m)=>({
+    "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#039;"
+  }[m]));
 }
+
+function hashColor(str){
+  // cor estável por id/nome (HSL)
+  let h = 0;
+  for (let i=0;i<str.length;i++) h = (h*31 + str.charCodeAt(i)) >>> 0;
+  const hue = (h % 360);
+  return `hsl(${hue}, 80%, 62%)`;
+}
+
+function setMpStatus(text, ok=false){
+  mpStatus.textContent = text;
+  mpStatus.style.color = ok ? "rgba(140,255,170,.95)" : "rgba(255,190,190,.95)";
+}
+
+function addChatLine(name, color, text){
+  const el = document.createElement("div");
+  el.innerHTML = `<span style="color:${color}; font-weight:800;">${escapeHtml(name)}</span>: ${escapeHtml(text)}`;
+  chatLog.appendChild(el);
+  while (chatLog.childNodes.length > 70) chatLog.removeChild(chatLog.firstChild);
+  chatLog.scrollTop = chatLog.scrollHeight;
+}
+
 function roundRect(ctx, x, y, w, h, r){
-  const rr = Math.min(r, w/2, h/2);
   ctx.beginPath();
-  ctx.moveTo(x+rr, y);
-  ctx.arcTo(x+w, y, x+w, y+h, rr);
-  ctx.arcTo(x+w, y+h, x, y+h, rr);
-  ctx.arcTo(x, y+h, x, y, rr);
-  ctx.arcTo(x, y, x+w, y, rr);
+  ctx.moveTo(x+r, y);
+  ctx.arcTo(x+w, y, x+w, y+h, r);
+  ctx.arcTo(x+w, y+h, x, y+h, r);
+  ctx.arcTo(x, y+h, x, y, r);
+  ctx.arcTo(x, y, x+w, y, r);
   ctx.closePath();
 }
-function makeNameSprite(name){
+
+function makeNameSprite(name, color){
+  // Nome pequeno (não gigante)
   const canvas = document.createElement("canvas");
   const ctx = canvas.getContext("2d");
-  const pad = 14;
-  const fontSize = 38;
-  ctx.font = `600 ${fontSize}px system-ui, Segoe UI, Arial`;
-  const textW = Math.ceil(ctx.measureText(name).width);
-  canvas.width = Math.min(512, Math.max(160, textW + pad*2));
-  canvas.height = 96;
 
-  const ctx2 = canvas.getContext("2d");
-  ctx2.font = `600 ${fontSize}px system-ui, Segoe UI, Arial`;
-  ctx2.textAlign = "center";
-  ctx2.textBaseline = "middle";
+  const W = 256, H = 64;
+  canvas.width = W;
+  canvas.height = H;
 
-  ctx2.fillStyle = "rgba(0,0,0,0.55)";
-  roundRect(ctx2, 10, 14, canvas.width-20, canvas.height-28, 18);
-  ctx2.fill();
+  ctx.clearRect(0,0,W,H);
 
-  ctx2.strokeStyle = "rgba(255,255,255,0.35)";
-  ctx2.lineWidth = 3;
-  roundRect(ctx2, 10, 14, canvas.width-20, canvas.height-28, 18);
-  ctx2.stroke();
+  ctx.globalAlpha = 0.92;
+  ctx.fillStyle = "rgba(0,0,0,0.55)";
+  roundRect(ctx, 8, 10, W-16, H-20, 14);
+  ctx.fill();
 
-  ctx2.fillStyle = "rgba(234,241,255,0.95)";
-  ctx2.fillText(name, canvas.width/2, canvas.height/2);
+  ctx.globalAlpha = 0.95;
+  ctx.strokeStyle = "rgba(255,255,255,0.20)";
+  ctx.lineWidth = 2;
+  ctx.stroke();
+
+  ctx.globalAlpha = 1;
+  ctx.font = "800 26px system-ui, Segoe UI, Arial";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+
+  ctx.lineWidth = 6;
+  ctx.strokeStyle = "rgba(0,0,0,0.55)";
+  ctx.strokeText(name, W/2, H/2);
+
+  ctx.fillStyle = color;
+  ctx.fillText(name, W/2, H/2);
 
   const tex = new THREE.CanvasTexture(canvas);
   tex.colorSpace = THREE.SRGBColorSpace;
-  tex.minFilter = THREE.LinearFilter;
-  tex.magFilter = THREE.LinearFilter;
+  tex.needsUpdate = true;
 
-  const matSprite = new THREE.SpriteMaterial({ map: tex, transparent: true, depthTest: true });
-  const spr = new THREE.Sprite(matSprite);
-  const scale = 2.8;
-  spr.scale.set((canvas.width/canvas.height)*scale, scale, 1);
+  const sm = new THREE.SpriteMaterial({ map: tex, transparent: true, depthWrite:false });
+  const spr = new THREE.Sprite(sm);
+
+  // >>> menor e legível
+  spr.scale.set(1.55, 0.38, 1);
   return spr;
 }
 
-function createRemoteAvatar(id, name){
-  const group = new THREE.Group();
+function ensureRemote(p){
+  if (!p?.id || p.id === myId) return null;
 
-  const color = pickColorFromId(id);
-  const cylMat = new THREE.MeshStandardMaterial({ color, roughness: 0.75, metalness: 0.05 });
-  const body = new THREE.Mesh(new THREE.CylinderGeometry(0.35, 0.35, 1.7, 14), cylMat);
-  body.castShadow = QUALITY === "high";
-  body.receiveShadow = QUALITY === "high";
-  body.position.y = 0.85;
-  group.add(body);
+  let r = remotes.get(p.id);
+  if (r) return r;
 
-  const nose = new THREE.Mesh(
-    new THREE.BoxGeometry(0.10,0.10,0.30),
-    new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.8 })
+  const color = hashColor(p.id);
+  const cyl = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.35, 0.35, 1.65, 12),
+    new THREE.MeshStandardMaterial({ color: new THREE.Color(color) })
   );
-  nose.position.set(0, 1.25, -0.35);
-  group.add(nose);
+  cyl.castShadow = QUALITY === "high";
+  cyl.receiveShadow = QUALITY === "high";
+  scene.add(cyl);
 
-  const label = makeNameSprite(name || "Player");
-  label.position.set(0, 2.25, 0);
-  group.add(label);
+  const label = makeNameSprite(p.name || "Player", color);
+  label.position.set(0, 1.28, 0);
+  cyl.add(label);
 
-  scene.add(group);
-  return { group, label };
-}
-function ensureRemote(id, name){
-  if (remotes.has(id)) return remotes.get(id);
-  const { group, label } = createRemoteAvatar(id, name);
-  const obj = {
-    id,
-    name: name || "Player",
-    group,
+  r = {
+    id: p.id,
+    name: p.name || "Player",
+    color,
+    mesh: cyl,
     label,
-    pos: new THREE.Vector3(18,0,18),
-    targetPos: new THREE.Vector3(18,0,18),
-    yaw: 0,
-    targetYaw: 0,
-    lastSeen: performance.now()
+    targetPos: new THREE.Vector3(p.x||0, p.y||0, p.z||0),
+    renderPos: new THREE.Vector3(p.x||0, p.y||0, p.z||0),
+    targetYaw: p.yaw || 0,
+    renderYaw: p.yaw || 0
   };
-  remotes.set(id, obj);
-  return obj;
+  remotes.set(p.id, r);
+  return r;
 }
+
 function removeRemote(id){
   const r = remotes.get(id);
   if (!r) return;
-  scene.remove(r.group);
-  r.group.traverse(o=>{
-    if (o.material){
-      if (o.material.map) o.material.map.dispose();
-      o.material.dispose();
-    }
-    if (o.geometry) o.geometry.dispose();
-  });
+  r.mesh.remove(r.label);
+  scene.remove(r.mesh);
+
+  r.mesh.geometry.dispose();
+  r.mesh.material.dispose();
+  if (r.label.material.map) r.label.material.map.dispose();
+  r.label.material.dispose();
+
   remotes.delete(id);
 }
 
-function connectAndJoin(){
-  const name = (inpName.value || "Player").trim().slice(0,16) || "Player";
-  const room = (inpRoom.value || "").trim().slice(0,12);
-  if (!room){ setNetStatus("digite a sala", "warn"); return; }
-  if (WS_URL_DEFAULT.includes("COLOQUE_SEU_RENDER_AQUI")){
-    setNetStatus("coloque sua URL WSS do Render", "warn");
-    return;
-  }
+function connectWS(){
+  if (!joinedRoom) return;
+  if (ws && (ws.readyState === 0 || ws.readyState === 1)) return;
 
-  net.myName = name;
-  net.room = room;
-
-  try{ ws?.close(); }catch(e){}
+  setMpStatus("conectando...", false);
   ws = new WebSocket(WS_URL);
 
-  ws.addEventListener("open", ()=>{
-    net.connected = true;
-    setNetStatus("conectado...", "ok");
-    ws.send(JSON.stringify({ t:"join", room, name }));
+  ws.addEventListener("open", () => {
+    setMpStatus("online", true);
+    myId = null;
+    ws.send(JSON.stringify({ t:"join", room: joinedRoom, name: joinedName }));
   });
 
   ws.addEventListener("message", (ev)=>{
-    let msg=null; try{ msg=JSON.parse(ev.data);}catch(e){return;}
+    let msg;
+    try { msg = JSON.parse(ev.data); } catch { return; }
+
     if (msg.t === "welcome"){
-      net.myId = msg.id;
-      setNetStatus(`online • sala ${net.room}`, "ok");
+      myId = msg.id;
+      addChatLine("Sistema","rgba(255,255,255,.85)",`Você entrou na sala ${joinedRoom}`);
+      return;
     }
 
-    if (msg.t === "state"){
-      const now = performance.now();
-      const list = msg.players || [];
-      for (const p of list){
-        if (!p || !p.id) continue;
-        if (p.id === net.myId) continue;
+    if (msg.t === "state" && Array.isArray(msg.players)){
+      const alive = new Set();
+      for (const p of msg.players){
+        if (!p?.id) continue;
+        alive.add(p.id);
+        const r = ensureRemote(p);
+        if (!r) continue;
 
-        const r = ensureRemote(p.id, p.name);
-        r.lastSeen = now;
-
-        if (p.name && p.name !== r.name){
-          r.name = p.name;
-          r.group.remove(r.label);
-          if (r.label.material?.map) r.label.material.map.dispose();
-          r.label.material.dispose();
-          r.label = makeNameSprite(r.name);
-          r.label.position.set(0, 2.25, 0);
-          r.group.add(r.label);
-        }
-
-        r.targetPos.set(p.x||0, Math.max(0, p.y||0), p.z||0);
+        // atualiza targets (suavização no tick)
+        r.targetPos.set(p.x||0, p.y||0, p.z||0);
         r.targetYaw = p.yaw || 0;
-      }
 
-      for (const [id, r] of remotes){
-        if ((now - r.lastSeen) > 5000) removeRemote(id);
+        // se mudou nome, recria label
+        const newName = p.name || r.name;
+        if (newName !== r.name){
+          r.name = newName;
+          r.mesh.remove(r.label);
+          if (r.label.material.map) r.label.material.map.dispose();
+          r.label.material.dispose();
+          r.label = makeNameSprite(r.name, r.color);
+          r.label.position.set(0,1.28,0);
+          r.mesh.add(r.label);
+        }
       }
+      for (const [id] of remotes){
+        if (!alive.has(id)) removeRemote(id);
+      }
+      return;
     }
 
     if (msg.t === "left"){
-      if (msg.id) removeRemote(msg.id);
+      removeRemote(msg.id);
+      return;
     }
+
+    if (msg.t === "chat"){
+      const c = hashColor(msg.id || msg.name || "x");
+      addChatLine(msg.name || "Player", c, msg.msg || "");
+      return;
+    }
+
     if (msg.t === "error"){
-      setNetStatus(msg.message || "erro", "warn");
+      addChatLine("Sistema","rgba(255,190,190,.95)", msg.message || "Erro");
+      return;
     }
   });
 
   ws.addEventListener("close", ()=>{
-    net.connected = false;
-    setNetStatus("offline", "muted");
+    setMpStatus("offline", false);
+    ws = null; myId = null;
     for (const [id] of remotes) removeRemote(id);
   });
 
   ws.addEventListener("error", ()=>{
-    setNetStatus("erro conexão", "warn");
+    setMpStatus("erro", false);
   });
 }
 
-function leaveRoom(){
-  try{ ws?.close(); }catch(e){}
-  ws = null;
-  net.connected = false;
-  setNetStatus("offline", "muted");
-  for (const [id] of remotes) removeRemote(id);
-}
-
-btnJoin.addEventListener("click", connectAndJoin);
-btnLeave.addEventListener("click", leaveRoom);
-
-function netSendMyState(now){
-  if (!net.connected || !ws || ws.readyState !== 1 || !net.myId) return;
-  const interval = 1000 / net.sendHz;
-  if ((now - net.lastSend) < interval) return;
-  net.lastSend = now;
-
-  ws.send(JSON.stringify({
-    t: "me",
-    x: +player.pos.x.toFixed(3),
-    y: +player.pos.y.toFixed(3),
-    z: +player.pos.z.toFixed(3),
-    yaw: +yaw.toFixed(4),
-    ts: Date.now()
-  }));
-}
-
-function updateRemotes(dt){
-  const lerpPos = 1 - Math.pow(0.001, dt);
-  const lerpYaw = 1 - Math.pow(0.0008, dt);
-
-  for (const r of remotes.values()){
-    r.pos.lerp(r.targetPos, lerpPos);
-
-    let dy = r.targetYaw - r.yaw;
-    dy = Math.atan2(Math.sin(dy), Math.cos(dy));
-    r.yaw += dy * lerpYaw;
-
-    r.group.position.set(r.pos.x, r.pos.y, r.pos.z);
-    r.group.rotation.y = r.yaw;
-    r.label.quaternion.copy(camera.quaternion);
+btnJoin.addEventListener("click", ()=>{
+  joinedName = (mpName.value || "Player").trim().slice(0,18) || "Player";
+  joinedRoom = (mpRoom.value || "").trim().slice(0,16);
+  if (!joinedRoom){
+    addChatLine("Sistema","rgba(255,190,190,.95)","Digite um código de sala (ex: favela1)");
+    return;
   }
-}
+  connectWS();
+});
 
+function sendChat(){
+  const text = (chatInput.value || "").trim();
+  if (!text) return;
+  chatInput.value = "";
+
+  if (!ws || ws.readyState !== 1){
+    addChatLine("Sistema","rgba(255,190,190,.95)","Você está offline.");
+    return;
+  }
+  ws.send(JSON.stringify({ t:"chat", msg: text }));
+}
+chatSend.addEventListener("click", sendChat);
+chatInput.addEventListener("keydown", (e)=>{ if (e.key === "Enter") sendChat(); });
+
+// tecla T abre chat
+addEventListener("keydown", (e)=>{
+  if (e.code === "KeyT"){
+    e.preventDefault();
+    chatInput.focus();
+  }
+});
+
+//
 // ===== LOOP =====
+//
 let last = performance.now();
 let fpsSmooth = 60;
 
@@ -964,15 +1113,50 @@ function tick(){
 
   camera.position.set(player.pos.x, player.pos.y + cfg.eyeHeight, player.pos.z);
 
-  netSendMyState(now);
-  updateRemotes(dt);
+  // ===== multiplayer: envia 15x/s (não spamma) =====
+  tick._sendAcc = (tick._sendAcc || 0) + dt;
+  const SEND_DT = 1/15;
+
+  if (ws && ws.readyState === 1 && myId){
+    while (tick._sendAcc >= SEND_DT){
+      tick._sendAcc -= SEND_DT;
+      ws.send(JSON.stringify({
+        t:"me",
+        x: player.pos.x,
+        y: player.pos.y,
+        z: player.pos.z,
+        yaw: yaw
+      }));
+    }
+  } else {
+    tick._sendAcc = Math.min(tick._sendAcc, SEND_DT);
+  }
+
+  // ===== multiplayer: suavização LERP =====
+  const posAlpha = 1 - Math.exp(-dt * 12.0);
+  const yawAlpha = 1 - Math.exp(-dt * 14.0);
+
+  for (const r of remotes.values()){
+    r.renderPos.lerp(r.targetPos, posAlpha);
+
+    let a = r.renderYaw;
+    let b = r.targetYaw;
+    let d = ((b - a + Math.PI) % (Math.PI*2)) - Math.PI;
+    r.renderYaw = a + d * yawAlpha;
+
+    r.mesh.position.set(r.renderPos.x, r.renderPos.y + 0.825, r.renderPos.z);
+    r.mesh.rotation.y = r.renderYaw;
+
+    // nome sempre de frente pra câmera
+    r.label.quaternion.copy(camera.quaternion);
+  }
 
   stats.innerHTML =
     `<b>Status</b><br>`+
     `FPS: <b>${fpsSmooth.toFixed(0)}</b><br>`+
     `Pos: <span class="muted">${player.pos.x.toFixed(1)}, ${player.pos.y.toFixed(1)}, ${player.pos.z.toFixed(1)}</span><br>`+
     `Chão: <b>${player.onGround ? "sim" : "não"}</b><br>`+
-    `Sala: <b>${net.room || "-"}</b> · Jogadores: <b>${(net.connected? (remotes.size+1) : 1)}</b>`;
+    `Sala: <b>${joinedRoom || "-"}</b> · Jogadores: <b>${(myId ? (remotes.size+1) : 1)}</b>`;
 
   renderer.render(scene, camera);
 }
@@ -986,8 +1170,10 @@ addEventListener("resize", () => {
 
 applyQuality();
 resetPlayer();
-setNetStatus("offline", "muted");
+setMpStatus("offline", false);
+
+// chat msg inicial
+addChatLine("Sistema","rgba(255,255,255,.85)","Dica: aperta T pra abrir o chat. Entre numa sala pra jogar com amigos.");
 </script>
 </body>
 </html>
-
